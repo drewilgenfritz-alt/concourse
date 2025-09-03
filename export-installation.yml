@@ -8,15 +8,15 @@ resources:
     regexp: installation-(.*).zip
 
 
-- name: state
-  type: s3
-  source:
-    access_key_id: ((s3-access-key-id))
-    secret_access_key: ((s3-secret-key))
-    bucket: ((platform-automation-bucket))
-    versioned_file: state-((foundation)).yml
-    initial_content_text: '{}'
-    initial_version: 'empty-start'
+# - name: state
+#   type: s3
+#   source:
+#     access_key_id: ((s3-access-key-id))
+#     secret_access_key: ((s3-secret-key))
+#     bucket: ((platform-automation-bucket))
+#     versioned_file: state-((foundation)).yml
+#     initial_content_text: '{}'
+#     initial_version: 'empty-start'
 
 - name: platform-automation-image
   type: s3
@@ -24,7 +24,22 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: .*image-(.*).tgz
+    versioned_file: vsphere-platform-automation-image-5.3.0.tar.gz
+
+- name: platform-automation-tasks
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: .*tasks-(.*).zip
+    
+# - name: foundation-secrets
+#   type: git
+#   source:
+#     private_key: ((platform-automation/main/platform_automation_deployments_ghe_deploy_key.private_key))
+#     uri: ((platform-automation/main.platform_automation_deployments_ghe_uri))
+#     branch: main
 
 # - name: configuration
 #   type: git
@@ -48,15 +63,37 @@ resources:
 #   tags: [platform-automation]
 
 jobs:
+  - name: test-platform-automation
+    serial: true
+    plan:
+      - in_parallel:
+        - get: platform-automation-image
+          params:
+            unpack: true
+        - get: platform-automation-tasks
+          params:
+            unpack: true
+        # - get: configuration
+      # - task: test-interpolate
+      #   image: platform-automation-image
+      #   file: platform-automation-tasks/tasks/test-interpolate.yml
+      #   params:
+      #     CONFIG_FILE: foundations/((foundation))/config/download-tas.yml
+      #     SKIP_MISSING: true
+      #   input_mapping:
+      #     config: configuration
+      - task: test
+        file: platform-automation-tasks/tasks/test.yml
+        image: platform-automation-image
   - name: export-installation
     serial: true
     plan:
       - get: platform-automation-image
-        resource: platform-automation
-        params: { globs: ["*image*.tgz"], unpack: true }
+        params:
+          unpack: true
       - get: platform-automation-tasks
-        resource: platform-automation
-        params: { globs: ["*tasks*.zip"], unpack: true }
+        params:
+          unpack: true
       - get: env
       - task: export-installation
         image: platform-automation-image
@@ -64,56 +101,56 @@ jobs:
       - put: installation
         params: { file: installation/installation-*.zip }
 
-  - name: export-installation
-    # serial_groups: [ install ]
-    serial: true
-    plan:
-    - in_parallel:
-      - get: state
-        tags: [platform-automation]
-        passed: [ install-opsman ]
-      - get: daily-trigger
-        tags: [platform-automation]
-        trigger: true
-      - get: platform-automation-image
-        tags: [platform-automation]
-        params:
-          unpack: true
-      - get: platform-automation-tasks
-        tags: [platform-automation]
-        params:
-          unpack: true
-      - get: configuration
-        tags: [platform-automation]
-      - get: foundation-secrets
-        tags: [platform-automation]
-    - task: prepare-tasks-with-secrets
-      <<: *prepare-tasks-with-secrets
-    - task: prepare-image
-      tags: [platform-automation]
-      <<: *prepare-image
-    # code_snippet revert-staged-changes-usage start yaml
-    - task: revert-staged-changes
-      tags: [platform-automation]
-      image: platform-automation-image
-      file: platform-automation-tasks/tasks/revert-staged-changes.yml
-      input_mapping:
-        env: foundation-secrets
-      params:
-        ENV_FILE: reference-epc/((foundation))/secrets/env.yml
-    # code_snippet revert-staged-changes-usage end
-    # code_snippet export-installation-usage start yaml
-    - task: export-installation
-      tags: [platform-automation]
-      image: platform-automation-image
-      file: platform-automation-tasks/tasks/export-installation.yml
-      input_mapping:
-        env: foundation-secrets
-      params:
-        ENV_FILE: reference-epc/((foundation))/secrets/env.yml
-        INSTALLATION_FILE: ((foundation))-installation-$timestamp.zip
-    # code_snippet export-installation-usage end
-    - put: installation
-      tags: [platform-automation]
-      params:
-        file: installation/((foundation))-installation*.zip
+  # - name: export-installation
+  #   # serial_groups: [ install ]
+  #   serial: true
+  #   plan:
+  #   - in_parallel:
+  #     - get: state
+  #       tags: [platform-automation]
+  #       passed: [ install-opsman ]
+  #     - get: daily-trigger
+  #       tags: [platform-automation]
+  #       trigger: true
+  #     - get: platform-automation-image
+  #       tags: [platform-automation]
+  #       params:
+  #         unpack: true
+  #     - get: platform-automation-tasks
+  #       tags: [platform-automation]
+  #       params:
+  #         unpack: true
+  #     - get: configuration
+  #       tags: [platform-automation]
+  #     - get: foundation-secrets
+  #       tags: [platform-automation]
+  #   - task: prepare-tasks-with-secrets
+  #     <<: *prepare-tasks-with-secrets
+  #   - task: prepare-image
+  #     tags: [platform-automation]
+  #     <<: *prepare-image
+  #   # code_snippet revert-staged-changes-usage start yaml
+  #   - task: revert-staged-changes
+  #     tags: [platform-automation]
+  #     image: platform-automation-image
+  #     file: platform-automation-tasks/tasks/revert-staged-changes.yml
+  #     input_mapping:
+  #       env: foundation-secrets
+  #     params:
+  #       ENV_FILE: reference-epc/((foundation))/secrets/env.yml
+  #   # code_snippet revert-staged-changes-usage end
+  #   # code_snippet export-installation-usage start yaml
+  #   - task: export-installation
+  #     tags: [platform-automation]
+  #     image: platform-automation-image
+  #     file: platform-automation-tasks/tasks/export-installation.yml
+  #     input_mapping:
+  #       env: foundation-secrets
+  #     params:
+  #       ENV_FILE: reference-epc/((foundation))/secrets/env.yml
+  #       INSTALLATION_FILE: ((foundation))-installation-$timestamp.zip
+  #   # code_snippet export-installation-usage end
+  #   - put: installation
+  #     tags: [platform-automation]
+  #     params:
+  #       file: installation/((foundation))-installation*.zip
