@@ -34,12 +34,11 @@ resources:
     bucket: ((platform-automation-bucket))
     regexp: .*tasks-(.*).zip
     
-# - name: foundation-secrets
-#   type: git
-#   source:
-#     private_key: ((platform-automation/main/platform_automation_deployments_ghe_deploy_key.private_key))
-#     uri: ((platform-automation/main.platform_automation_deployments_ghe_uri))
-#     branch: main
+- name: foundation-secrets
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
 
 - name: configuration
   type: git
@@ -47,19 +46,19 @@ resources:
     uri: https://github.com/drewilgenfritz-alt/concourse.git
     branch: main
   
-# prepare-tasks-with-secrets: &prepare-tasks-with-secrets
-#   image: platform-automation-image
-#   file: platform-automation-tasks/tasks/prepare-tasks-with-secrets.yml
-#   input_mapping:
-#     tasks: platform-automation-tasks
-#     config: configuration
-#     vars: foundation-secrets
-#   params:
-#     CONFIG_PATHS: config/foundations/config config/foundations/((foundation))/config
-#     VARS_PATHS: vars/reference-epc/((foundation))/secrets config/foundations/((foundation))/vars
-#   output_mapping:
-#     tasks: platform-automation-tasks
-#   tags: [platform-automation]
+prepare-tasks-with-secrets: &prepare-tasks-with-secrets
+  image: platform-automation-image
+  file: platform-automation-tasks/tasks/prepare-tasks-with-secrets.yml
+  input_mapping:
+    tasks: platform-automation-tasks
+    config: configuration
+    vars: foundation-secrets
+  params:
+    CONFIG_PATHS: config/config
+    VARS_PATHS: vars/vars
+  output_mapping:
+    tasks: platform-automation-tasks
+
 
 jobs:
   - name: test-platform-automation
@@ -94,9 +93,18 @@ jobs:
         params:
           unpack: true
       - get: configuration
+      - get: foundation-secrets
+      - task: prepare-tasks-with-secrets
+        <<: *prepare-tasks-with-secrets
+      # - task: prepare-image
+      #   <<: *prepare-image
       - task: export-installation
         image: platform-automation-image
         file: platform-automation-tasks/tasks/export-installation.yml
+        input_mapping:
+          env: foundation-secrets
+        params:
+          ENV_FILE: secrets/env.yml
       - put: installation
         params: { file: installation/installation-*.zip }
 
