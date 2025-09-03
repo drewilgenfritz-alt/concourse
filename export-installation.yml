@@ -41,12 +41,11 @@ resources:
 #     uri: ((platform-automation/main.platform_automation_deployments_ghe_uri))
 #     branch: main
 
-# - name: configuration
-#   type: git
-#   source:
-#     private_key: ((platform-automation/main/docs-ref-pipeline-repo-key.private_key))
-#     uri: ((platform-automation/main.docs-ref-pipeline-repo-uri))
-#     branch: develop
+- name: configuration
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
   
 # prepare-tasks-with-secrets: &prepare-tasks-with-secrets
 #   image: platform-automation-image
@@ -94,7 +93,7 @@ jobs:
       - get: platform-automation-tasks
         params:
           unpack: true
-      - get: env
+      - get: configuration
       - task: export-installation
         image: platform-automation-image
         file: platform-automation-tasks/tasks/export-installation.yml
