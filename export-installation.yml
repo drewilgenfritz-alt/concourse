@@ -104,7 +104,7 @@ jobs:
         input_mapping:
           env: foundation-secrets
         params:
-          ENV_FILE: secrets/env.yml
+          ENV_FILE: vars/env.yml
       - put: installation
         params: { file: installation/installation-*.zip }
 
