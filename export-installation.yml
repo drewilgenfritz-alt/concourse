@@ -34,11 +34,11 @@ resources:
     bucket: ((platform-automation-bucket))
     regexp: .*tasks-(.*).zip
     
-- name: foundation-secrets
-  type: git
-  source:
-    uri: https://github.com/drewilgenfritz-alt/concourse.git
-    branch: main
+# - name: foundation-secrets
+#   type: git
+#   source:
+#     uri: https://github.com/drewilgenfritz-alt/concourse.git
+#     branch: main
 
 - name: configuration
   type: git
@@ -52,7 +52,7 @@ prepare-tasks-with-secrets: &prepare-tasks-with-secrets
   input_mapping:
     tasks: platform-automation-tasks
     config: configuration
-    vars: foundation-secrets
+    vars: configuration
   params:
     CONFIG_PATHS: config/config
     VARS_PATHS: vars/vars
@@ -71,15 +71,15 @@ jobs:
         - get: platform-automation-tasks
           params:
             unpack: true
-        # - get: configuration
-      # - task: test-interpolate
-      #   image: platform-automation-image
-      #   file: platform-automation-tasks/tasks/test-interpolate.yml
-      #   params:
-      #     CONFIG_FILE: foundations/((foundation))/config/download-tas.yml
-      #     SKIP_MISSING: true
-      #   input_mapping:
-      #     config: configuration
+        - get: configuration
+      - task: test-interpolate
+        image: platform-automation-image
+        file: platform-automation-tasks/tasks/test-interpolate.yml
+        params:
+          CONFIG_FILE: config/vars/env.yml
+          SKIP_MISSING: true
+        input_mapping:
+          config: configuration
       - task: test
         file: platform-automation-tasks/tasks/test.yml
         image: platform-automation-image
@@ -93,7 +93,6 @@ jobs:
         params:
           unpack: true
       - get: configuration
-      - get: foundation-secrets
       - task: prepare-tasks-with-secrets
         <<: *prepare-tasks-with-secrets
       # - task: prepare-image
@@ -102,9 +101,9 @@ jobs:
         image: platform-automation-image
         file: platform-automation-tasks/tasks/export-installation.yml
         input_mapping:
-          env: foundation-secrets
+          env: configuration
         params:
-          ENV_FILE: vars/env.yml
+          ENV_FILE: config/vars/env.yml
       - put: installation
         params: { file: installation/installation-*.zip }
 
