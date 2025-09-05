@@ -238,16 +238,16 @@ product-properties:
   .properties.networking_poe_ssl_certs:
     value:
     - certificate:
-        cert_pem: ((properties_networking_poe_ssl__certs_0.cert_pem))
-        private_key_pem: ((properties_networking_poe_ssl__certs_0.private_key_pem))
+        cert_pem: ((properties_networking_poe_ssl__certs_0.public_key))
+        private_key_pem: ((properties_networking_poe_ssl__certs_0.'private_key))
       name: wildcard
     - certificate:
-        cert_pem: ((properties_networking_poe_ssl__certs_1.cert_pem))
-        private_key_pem: ((properties_networking_poe_ssl__certs_1.private_key_pem))
+        cert_pem: ((properties_networking_poe_ssl__certs_1.public_key))
+        private_key_pem: ((properties_networking_poe_ssl__certs_1.'private_key))
       name: sys
     - certificate:
-        cert_pem: ((properties_networking_poe_ssl__certs_2.cert_pem))
-        private_key_pem: ((properties_networking_poe_ssl__certs_2.private_key_pem))
+        cert_pem: ((properties_networking_poe_ssl__certs_2.public_key))
+        private_key_pem: ((properties_networking_poe_ssl__certs_2.'private_key))
       name: app
   .properties.networkpolicyserver_database_max_open_connections:
     value: 200
