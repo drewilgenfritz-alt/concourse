@@ -8,15 +8,15 @@ resources:
     regexp: installation-(.*).zip
 
 
-# - name: state
-#   type: s3
-#   source:
-#     access_key_id: ((s3-access-key-id))
-#     secret_access_key: ((s3-secret-key))
-#     bucket: ((platform-automation-bucket))
-#     versioned_file: state-((foundation)).yml
-#     initial_content_text: '{}'
-#     initial_version: 'empty-start'
+- name: state
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    versioned_file: state.yml
+    initial_content_text: '{}'
+    initial_version: 'empty-start'
 
 - name: platform-automation-image
   type: s3
@@ -34,12 +34,6 @@ resources:
     bucket: ((platform-automation-bucket))
     regexp: .*tasks-(.*).zip
     
-# - name: foundation-secrets
-#   type: git
-#   source:
-#     uri: https://github.com/drewilgenfritz-alt/concourse.git
-#     branch: main
-
 - name: configuration
   type: git
   source:
@@ -95,8 +89,6 @@ jobs:
       - get: configuration
       - task: prepare-tasks-with-secrets
         <<: *prepare-tasks-with-secrets
-      # - task: prepare-image
-      #   <<: *prepare-image
       - task: export-installation
         image: platform-automation-image
         file: platform-automation-tasks/tasks/export-installation.yml
@@ -106,57 +98,3 @@ jobs:
           ENV_FILE: config/vars/env.yml
       - put: installation
         params: { file: installation/installation-*.zip }
-
-  # - name: export-installation
-  #   # serial_groups: [ install ]
-  #   serial: true
-  #   plan:
-  #   - in_parallel:
-  #     - get: state
-  #       tags: [platform-automation]
-  #       passed: [ install-opsman ]
-  #     - get: daily-trigger
-  #       tags: [platform-automation]
-  #       trigger: true
-  #     - get: platform-automation-image
-  #       tags: [platform-automation]
-  #       params:
-  #         unpack: true
-  #     - get: platform-automation-tasks
-  #       tags: [platform-automation]
-  #       params:
-  #         unpack: true
-  #     - get: configuration
-  #       tags: [platform-automation]
-  #     - get: foundation-secrets
-  #       tags: [platform-automation]
-  #   - task: prepare-tasks-with-secrets
-  #     <<: *prepare-tasks-with-secrets
-  #   - task: prepare-image
-  #     tags: [platform-automation]
-  #     <<: *prepare-image
-  #   # code_snippet revert-staged-changes-usage start yaml
-  #   - task: revert-staged-changes
-  #     tags: [platform-automation]
-  #     image: platform-automation-image
-  #     file: platform-automation-tasks/tasks/revert-staged-changes.yml
-  #     input_mapping:
-  #       env: foundation-secrets
-  #     params:
-  #       ENV_FILE: reference-epc/((foundation))/secrets/env.yml
-  #   # code_snippet revert-staged-changes-usage end
-  #   # code_snippet export-installation-usage start yaml
-  #   - task: export-installation
-  #     tags: [platform-automation]
-  #     image: platform-automation-image
-  #     file: platform-automation-tasks/tasks/export-installation.yml
-  #     input_mapping:
-  #       env: foundation-secrets
-  #     params:
-  #       ENV_FILE: reference-epc/((foundation))/secrets/env.yml
-  #       INSTALLATION_FILE: ((foundation))-installation-$timestamp.zip
-  #   # code_snippet export-installation-usage end
-  #   - put: installation
-  #     tags: [platform-automation]
-  #     params:
-  #       file: installation/((foundation))-installation*.zip

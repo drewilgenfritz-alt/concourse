@@ -1,0 +1,109 @@
+resources:
+- name: installation
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: installation-(.*).zip
+
+
+# - name: state
+#   type: s3
+#   source:
+#     access_key_id: ((s3-access-key-id))
+#     secret_access_key: ((s3-secret-key))
+#     bucket: ((platform-automation-bucket))
+#     versioned_file: state.yml
+#     initial_content_text: '{}'
+#     initial_version: 'empty-start'
+
+- name: platform-automation-image
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    versioned_file: vsphere-platform-automation-image-5.3.0.tar.gz
+
+- name: platform-automation-tasks
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: .*tasks-(.*).zip
+    
+- name: configuration
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+  
+prepare-tasks-with-secrets: &prepare-tasks-with-secrets
+  image: platform-automation-image
+  file: platform-automation-tasks/tasks/prepare-tasks-with-secrets.yml
+  input_mapping:
+    tasks: platform-automation-tasks
+    config: configuration
+    vars: configuration
+  params:
+    CONFIG_PATHS: config/config
+    VARS_PATHS: vars/vars
+  output_mapping:
+    tasks: platform-automation-tasks
+
+
+
+jobs:
+- name: upgrade-opsman
+  serial: true
+  plan:
+    - get: platform-automation-image
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      params:
+        unpack: true
+    - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: revert-staged-changes
+      tags: [platform-automation]
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/revert-staged-changes.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - put: installation
+      params: { file: installation/installation-*.zip }
+    - task: upgrade-opsman
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/upgrade-opsman.yml
+      input_mapping:
+        image: opsman-image
+        config: configuration
+        env: configuration
+        vars: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        OPSMAN_CONFIG_FILE: config/opsman.yml
+        STATE_FILE: state.yml
+        INSTALLATION_FILE: installation*.zip
+        VARS_FILES: vars/vars/director.yml
+    - task: upload-pks-stemcell
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/upload-stemcell.yml
+      input_mapping:
+        env: configuration
+        stemcell: pks-stemcell
+      params:
+        ENV_FILE: config/vars/env.yml
