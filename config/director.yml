@@ -151,8 +151,8 @@ iaas-configurations:
     emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
     -----END CERTIFICATE-----
   vcenter_host: vcenter.home.fritzytech.com
-  vcenter_password: D!ckB@g!!12345
-  vcenter_username: administrator@home.fritzytech.com
+  vcenter_password: ((vspherePassword))
+  vcenter_username: ((vsphereUsername))
 network-assignment:
   network:
     name: MGMT
