@@ -1,0 +1,76 @@
+product-name: p-compliance-scanner
+product-properties:
+  .properties.benchmarks:
+    value:
+    - Jammy-CIS-Level-1
+    - Jammy-CIS-Level-2
+    - Jammy-STIG
+  .properties.bucket_selector:
+    selected_option: none
+    value: none
+  .properties.cni_dir:
+    value: /var/vcap/jobs/flanneld
+  .properties.cpu_limit:
+    value: 50
+  .properties.detection_timeout:
+    value: 1
+  .properties.enforce_cpu_limit:
+    selected_option: disabled
+    value: disabled
+  .properties.login_banner:
+    value: |
+      Unauthorized use is strictly prohibited. All access and activity is subject to logging and monitoring.
+  .properties.ntp_server:
+    value: 169.254.169.254
+  .properties.scan_report_formats:
+    value:
+    - csv
+    - xml
+    - html
+  .properties.scanner_timeout:
+    value: 6000
+  .properties.scheduled_scan_enabled:
+    selected_option: disabled
+    value: disabled
+  .properties.syslog_host:
+    value: 192.168.5.126
+  .properties.syslog_port:
+    value: 27017
+network-properties:
+  network:
+    name: Deployment
+  other_availability_zones:
+  - name: az1
+  singleton_availability_zone:
+    name: az1
+resource-config:
+  oscap_store:
+    max_in_flight: 1
+    additional_networks: []
+    additional_vm_extensions: []
+    avi:
+      pools: []
+    instance_type:
+      id: automatic
+    instances: automatic
+    nsxt:
+      lb:
+        server_pools: []
+      ns_groups: []
+      vif_type: null
+    swap_as_percent_of_memory_size: automatic
+errand-config:
+  scan_results:
+    post-deploy-state: true
+syslog-properties:
+  address: null
+  custom_rsyslog_configuration: null
+  enabled: false
+  environment: null
+  forward_debug_logs: false
+  permitted_peer: null
+  port: null
+  queue_size: null
+  ssl_ca_certificate: null
+  tls_enabled: false
+  transport_protocol: tcp

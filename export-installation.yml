@@ -5,18 +5,18 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: installation-(.*).zip
+    regexp: backups/installation/installation-(.*).zip
 
 
-- name: state
-  type: s3
-  source:
-    access_key_id: ((s3-access-key-id))
-    secret_access_key: ((s3-secret-key))
-    bucket: ((platform-automation-bucket))
-    versioned_file: state.yml
-    initial_content_text: '{}'
-    initial_version: 'empty-start'
+# - name: state
+#   type: s3
+#   source:
+#     access_key_id: ((s3-access-key-id))
+#     secret_access_key: ((s3-secret-key))
+#     bucket: ((platform-automation-bucket))
+#     versioned_file: state.yml
+#     initial_content_text: '{}'
+#     initial_version: 'empty-start'
 
 - name: platform-automation-image
   type: s3

@@ -1,3 +1,34 @@
+groups:
+- jobs:
+    # - delete-installation
+    - test-platform-automation
+    - export-installation
+    - upgrade-opsman
+    # - download-upload-and-stage-healthwatch-pas-exporter
+    # - download-upload-and-stage-healthwatch
+
+    # - configure-healthwatch-pas-exporter
+    # - configure-healthwatch
+    # - configure-tas
+    # - apply-product-changes
+    # - run-tas-smoketest-errand
+    # - collect-telemetry
+    # - stage-configure-apply-telemetry
+  name: opsmanager
+- jobs:
+    - upload-and-stage-tas
+    - upload-and-stage-hub
+    - upload-and-stage-compliance-scanner
+    - configure-tas
+    - configure-compliance-scanner
+    - configure-hub
+    # - create-root-ca
+    # - apply-new-ca
+    # - activate-new-ca-and-regenerate-certs
+    # - apply-certificates
+    # - cleanup-ca-certificate-authorities
+  name: tpcf-products
+
 resources:
 - name: installation
   type: s3
@@ -5,8 +36,47 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: installation-(.*).zip
+    regexp: backups/installation/installation-(.*).zip
 
+- name: tas-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/srt-(.*)\.pivotal
+
+- name: hub-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/tanzu-hub-(.*)\.pivotal
+
+- name: tas-stemcell
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
+
+- name: compliance-scanner-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/p-compliance-scanner-(.*)\.pivotal
+
+- name: compliance-scanner-stemcell
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
 
 # - name: state
 #   type: s3
@@ -39,6 +109,14 @@ resources:
   source:
     uri: https://github.com/drewilgenfritz-alt/concourse.git
     branch: main
+
+- name: opsman-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: ops-manager-vsphere-(.*)\.ova
   
 prepare-tasks-with-secrets: &prepare-tasks-with-secrets
   image: platform-automation-image
@@ -56,7 +134,7 @@ prepare-tasks-with-secrets: &prepare-tasks-with-secrets
 
 
 jobs:
-- name: upgrade-opsman
+- name: export-installation
   serial: true
   plan:
     - get: platform-automation-image
@@ -68,8 +146,51 @@ jobs:
     - get: configuration
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - put: installation
+      params: { file: installation/installation-*.zip }
+- name: test-platform-automation
+  serial: true
+  plan:
+    - in_parallel:
+      - get: platform-automation-image
+        params:
+          unpack: true
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+      - get: configuration
+    - task: test-interpolate
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/test-interpolate.yml
+      params:
+        CONFIG_FILE: config/vars/env.yml
+        SKIP_MISSING: true
+      input_mapping:
+        config: configuration
+    - task: test
+      file: platform-automation-tasks/tasks/test.yml
+      image: platform-automation-image
+- name: upgrade-opsman
+  serial: true
+  plan:
+    - get: platform-automation-image
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      params:
+        unpack: true
+    - get: configuration
+    - get: opsman-product
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
     - task: revert-staged-changes
-      tags: [platform-automation]
       image: platform-automation-image
       file: platform-automation-tasks/tasks/revert-staged-changes.yml
       input_mapping:
@@ -89,7 +210,7 @@ jobs:
       image: platform-automation-image
       file: platform-automation-tasks/tasks/upgrade-opsman.yml
       input_mapping:
-        image: opsman-image
+        image: opsman-product
         config: configuration
         env: configuration
         vars: configuration
@@ -107,3 +228,247 @@ jobs:
         stemcell: pks-stemcell
       params:
         ENV_FILE: config/vars/env.yml
+- name: upload-and-stage-tas
+  serial: true
+  serial_groups: [ products ]
+  plan:
+  - in_parallel:
+    - get: platform-automation-image
+      tags: [platform-automation]
+      params:
+        unpack: true
+      trigger: true
+      passed: [ "upgrade-opsman" ]
+    - get: platform-automation-tasks
+      tags: [platform-automation]
+      params:
+        unpack: true
+    - get: configuration
+      tags: [platform-automation]
+    - get: tas-product
+    - get: tas-stemcell
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: upload-tas-product
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-product.yml
+    input_mapping:
+      product: tas-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-tas-stemcell
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: configuration
+      stemcell: tas-stemcell
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-and-stage-tas
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/stage-product.yml
+    input_mapping:
+      product: tas-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+
+- name: upload-and-stage-hub
+  serial: true
+  serial_groups: [ products ]
+  plan:
+  - in_parallel:
+    - get: platform-automation-image
+      tags: [platform-automation]
+      params:
+        unpack: true
+      trigger: true
+      passed: [ "upgrade-opsman" ]
+    - get: platform-automation-tasks
+      tags: [platform-automation]
+      params:
+        unpack: true
+    - get: configuration
+      tags: [platform-automation]
+    - get: hub-product
+    - get: tas-stemcell
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: upload-hub-product
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-product.yml
+    input_mapping:
+      product: hub-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-tas-stemcell
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: configuration
+      stemcell: tas-stemcell
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-and-stage-hub
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/stage-product.yml
+    input_mapping:
+      product: hub-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+
+- name: upload-and-stage-compliance-scanner
+  serial: true
+  serial_groups: [ products ]
+  plan:
+  - in_parallel:
+    - get: platform-automation-image
+      tags: [platform-automation]
+      params:
+        unpack: true
+      trigger: true
+      passed: [ "upgrade-opsman" ]
+    - get: platform-automation-tasks
+      tags: [platform-automation]
+      params:
+        unpack: true
+    - get: configuration
+      tags: [platform-automation]
+    - get: compliance-scanner-product
+    - get: compliance-scanner-stemcell
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: upload-compliance-scanner-product
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-product.yml
+    input_mapping:
+      product: compliance-scanner-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-compliance-scanner-stemcell
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/upload-stemcell.yml
+    input_mapping:
+      env: configuration
+      stemcell: compliance-scanner-stemcell
+    params:
+      ENV_FILE: config/vars/env.yml
+  - task: upload-and-stage-compliance-scanner
+    tags: [platform-automation]
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/stage-product.yml
+    input_mapping:
+      product: compliance-scanner-product
+      env: configuration
+    params:
+      ENV_FILE: config/vars/env.yml
+
+- name: configure-tas
+  serial: true
+  serial_groups: [ install ]
+  plan:
+    - in_parallel:
+      - get: platform-automation-image
+        params:
+          unpack: true
+        passed:
+          - upload-and-stage-tas
+        trigger: true
+        tags: [platform-automation]
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+        tags: [platform-automation]
+      - get: configuration
+        tags: [platform-automation]
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: configure-tas
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/configure-product.yml
+      input_mapping:
+        config: configuration
+        env: configuration
+        # vars: configuration
+      params:
+        CONFIG_FILE: config/cf.yml
+        ENV_FILE: config/vars/env.yml
+        # VARS_FILES: secrets/tas.yml
+      tags: [platform-automation]
+
+- name: configure-hub
+  serial: true
+  serial_groups: [ install ]
+  plan:
+    - in_parallel:
+      - get: platform-automation-image
+        params:
+          unpack: true
+        passed:
+          - upload-and-stage-hub
+        trigger: true
+        tags: [platform-automation]
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+        tags: [platform-automation]
+      - get: configuration
+        tags: [platform-automation]
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: configure-hub
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/configure-product.yml
+      input_mapping:
+        config: configuration
+        env: configuration
+        # vars: configuration
+      params:
+        CONFIG_FILE: config/hub.yml
+        ENV_FILE: config/vars/env.yml
+        # VARS_FILES: secrets/tas.yml
+      tags: [platform-automation]
+- name: configure-compliance-scanner
+  serial: true
+  serial_groups: [ install ]
+  plan:
+    - in_parallel:
+      - get: platform-automation-image
+        params:
+          unpack: true
+        passed:
+          - upload-and-stage-compliance-scanner
+        trigger: true
+        tags: [platform-automation]
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+        tags: [platform-automation]
+      - get: configuration
+        tags: [platform-automation]
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: configure-compliance-scanner
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/configure-product.yml
+      input_mapping:
+        config: configuration
+        env: configuration
+        # vars: configuration
+      params:
+        CONFIG_FILE: config/compliance-scanner.yml
+        ENV_FILE: config/vars/env.yml
+        # VARS_FILES: secrets/tas.yml
+      tags: [platform-automation]

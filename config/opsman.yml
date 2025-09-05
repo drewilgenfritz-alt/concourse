@@ -1,21 +1,21 @@
-# opsman-configuration:
-#   vsphere:
-#     vcenter:
-#       url: ((vcenter_url))
-#       username: ((vcenter_user.username))
-#       password: ((vcenter_user.password))
-#       datastore: TanzuDS
-#       datacenter: TPCF
-#       resource_pool: /TPCF/TanzuPlatform/tanzuPool
-#       insecure: 1
-#     ssh_public_key: ((vsphere_ssh_key))
-#     disk_type: thin
-#     private_ip: 192.168.50.10
-#     dns: 192.168.50.1
-#     ntp: 0.pool.ntp.org
-#     hostname: ((opsman_url))
-#     network: MGMT
-#     netmask: 255.255.255.0
-#     gateway: 192.168.50.1
-#     memory: 9
-#     cpu: 2
+opsman-configuration:
+  vsphere:
+    vcenter:
+      url: vcenter.home.fritzytech.com
+      username: ((vsphereUsername))
+      password: ((vspherePassword))
+      datastore: TanzuDS
+      datacenter: TPCF
+      resource_pool: /TPCF/TanzuPlatform/tanzuPool
+      insecure: 1
+    ssh_public_key: ((vsphereSSH))
+    disk_type: thin
+    private_ip: 192.168.50.10
+    dns: 192.168.50.1
+    ntp: 0.pool.ntp.org
+    hostname: opsman.home.fritzytech.com
+    network: MGMT
+    netmask: 255.255.255.0
+    gateway: 192.168.50.1
+    memory: 9
+    cpu: 2
