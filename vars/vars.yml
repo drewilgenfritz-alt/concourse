@@ -1,1 +1,9 @@
-some initial_content_text
+---
+target: https://opsman.home.fritzytech.com
+connect-timeout: 30            # default 5
+request-timeout: 1800          # default 1800
+skip-ssl-validation: false     # default false
+username: drew
+password: ((opsman-password))
+
+decryption-passphrase: ((opsman-decryption))
