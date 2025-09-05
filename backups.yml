@@ -1,0 +1,72 @@
+resources:
+- name: backup
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: backups/backup-(.*).tgz
+    initial_content_text: '{}'
+    initial_version: 'empty-start'
+
+- name: platform-automation-image
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    versioned_file: vsphere-platform-automation-image-5.3.0.tar.gz
+
+- name: platform-automation-tasks
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: .*tasks-(.*).zip
+
+- name: configuration
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+
+prepare-tasks-with-secrets: &prepare-tasks-with-secrets
+  image: platform-automation-image
+  file: platform-automation-tasks/tasks/prepare-tasks-with-secrets.yml
+  input_mapping:
+    tasks: platform-automation-tasks
+    config: configuration
+    vars: configuration
+  params:
+    CONFIG_PATHS: config/config
+    VARS_PATHS: vars/vars
+  output_mapping:
+    tasks: platform-automation-tasks
+
+jobs:
+- name: backup-director
+  serial: true
+  plan:
+  - get: platform-automation-image
+    params:
+      unpack: true
+  - get: platform-automation-tasks
+    params:
+      unpack: true
+  - get: configuration
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: backup-director
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/backup-director.yml
+    params:
+      CONFIG_FILE: config/vars/env.yml
+      SKIP_MISSING: true
+      OPSMAN_SSH_PRIVATE_KEY: ((opsmanssh.private_key))
+      PRODUCT_NAME: p-bosh
+      ENV_FILE: config/vars/env.yml
+    input_mapping:
+      env: configuration
+  - put: backup
+    params: { file: backup/backup-*. }

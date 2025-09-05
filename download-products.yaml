@@ -1,0 +1,216 @@
+resources:
+- name: opsman-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: ops-manager-vsphere-(.*)\.ova
+
+
+- name: tas-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/srt-(.*)\.pivotal
+
+- name: hub-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/tanzu-hub-(.*)\.pivotal
+
+- name: tas-stemcell
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
+
+- name: healthwatch-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/\[p-healthwatch,(.*)\]healthwatch-\d.*.pivotal
+
+- name: compliance-scanner-product
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/p-compliance-scanner-(.*)\.pivotal
+
+- name: compliance-scanner-stemcell
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
+
+- name: healthwatch-pas-exporter
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: images/\[p-healthwatch,(.*)\]healthwatch-pas-exporter.*.pivotal
+
+
+- name: healthwatch-stemcell
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
+
+
+- name: platform-automation-tasks
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: platform-automation-tasks-(.*).zip
+
+- name: platform-automation-image
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: platform-automation-image-(.*).tgz
+
+- name: configuration
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+
+- name: daily
+  type: time
+  source:
+    interval: 24h
+
+jobs:
+- name: fetch-opsman
+  plan:
+  - in_parallel:
+    - get: daily
+      trigger: true
+    - get: platform-automation-image
+      params:
+        unpack: true
+    - get: platform-automation-tasks
+      params:
+        unpack: true
+    - get: configuration
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: download-opsman-image
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/download-product.yml
+    params:
+      CONFIG_FILE: download-product-pivnet/download-opsman.yml
+    input_mapping:
+      config: configuration
+  - in_parallel:
+    - put: opsman-product
+      params:
+        file: downloaded-product/*
+
+- name: fetch-tas
+  plan:
+    - in_parallel:
+      - get: daily
+        trigger: true
+      - get: platform-automation-image
+        params:
+          unpack: true
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+      - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: download-tas-product-and-stemcell
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/download-product.yml
+      params:
+        CONFIG_FILE: download-product-pivnet/download-tas.yml
+      input_mapping:
+        config: configuration
+      output_mapping: {downloaded-stemcell: tas-stemcell}
+    - in_parallel:
+        - put: tas-product
+          params:
+            file: downloaded-product/*.pivotal
+        - put: tas-stemcell
+          params:
+            file: tas-stemcell/*.tgz
+
+- name: fetch-healthwatch
+  plan:
+    - in_parallel:
+      - get: daily
+        trigger: true
+      - get: platform-automation-image
+        params:
+          unpack: true
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+      - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: download-healthwatch-product-and-stemcell
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/download-product.yml
+      params:
+        CONFIG_FILE: download-product-pivnet/download-healthwatch.yml
+      input_mapping:
+        config: configuration
+      output_mapping: {downloaded-stemcell: healthwatch-stemcell}
+    - in_parallel:
+        - put: healthwatch-product
+          params:
+            file: downloaded-product/*healthwatch-2*.pivotal
+        - put: healthwatch-stemcell
+          params:
+            file: healthwatch-stemcell/*.tgz
+
+- name: fetch-healthwatch-pas-exporter
+  plan:
+    - in_parallel:
+      - get: daily
+        trigger: true
+      - get: platform-automation-image
+        params:
+          unpack: true
+      - get: platform-automation-tasks
+        params:
+          unpack: true
+      - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: download-healthwatch-pas-exporter-and-stemcell
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/download-product.yml
+      params:
+        CONFIG_FILE: download-product-pivnet/download-healthwatch-pas-exporter.yml
+      input_mapping:
+        config: configuration
+    - in_parallel:
+        - put: healthwatch-pas-exporter
+          params:
+            file: downloaded-product/*healthwatch-pas-exporter*.pivotal
+

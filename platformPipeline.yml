@@ -22,6 +22,7 @@ groups:
     - configure-tas
     - configure-compliance-scanner
     - configure-hub
+    - apply-all-changes
   name: tpcf-products
 - jobs:
     - create-root-ca
@@ -30,6 +31,11 @@ groups:
     - apply-certificates
     - cleanup-ca-certificate-authorities
   name: certificate-rotation
+- jobs:
+    - bump-director
+    - bump-tas
+    - bump-compliance-scanner
+  name: gitops
 
 resources:
 - name: installation
@@ -61,7 +67,7 @@ resources:
   source:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
-    bucket: ((platform-automation-bucket))
+    # bucket: ((platform-automation-bucket))
     regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
 
 - name: compliance-scanner-product
@@ -70,25 +76,25 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: images/p-compliance-scanner-(.*)\.pivotal
+    regexp: images/p-compliance-scanner-(.*).pivotal
 
-- name: compliance-scanner-stemcell
-  type: s3
-  source:
-    access_key_id: ((s3-access-key-id))
-    secret_access_key: ((s3-secret-key))
-    bucket: ((platform-automation-bucket))
-    regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
-
-# - name: state
+# - name: compliance-scanner-stemcell
 #   type: s3
 #   source:
 #     access_key_id: ((s3-access-key-id))
 #     secret_access_key: ((s3-secret-key))
 #     bucket: ((platform-automation-bucket))
-#     versioned_file: state.yml
-#     initial_content_text: '{}'
-#     initial_version: 'empty-start'
+#     regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
+
+- name: state
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    versioned_file: state.yml
+    initial_content_text: '{}'
+    initial_version: 'empty-start'
 
 - name: platform-automation-image
   type: s3
@@ -105,12 +111,32 @@ resources:
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
     regexp: .*tasks-(.*).zip
-    
+
+## GITOPS FILES ##  
 - name: configuration
   type: git
   source:
     uri: https://github.com/drewilgenfritz-alt/concourse.git
     branch: main
+
+- name: director-config
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+    paths: ["config/director.yml"]
+- name: tas-config
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+    paths: ["config/cf.yml"]
+- name: compliance-scanner-config
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+    paths: ["config/compliance-scanner.yml"]
 
 - name: opsman-product
   type: s3
@@ -118,7 +144,7 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: ops-manager-vsphere-(.*)\.ova
+    regexp: images/ops-manager-vsphere-(.*)\.ova
   
 prepare-tasks-with-secrets: &prepare-tasks-with-secrets
   image: platform-automation-image
@@ -188,6 +214,7 @@ jobs:
     - get: platform-automation-tasks
       params:
         unpack: true
+    - get: state
     - get: configuration
     - get: opsman-product
     - task: prepare-tasks-with-secrets
@@ -215,44 +242,65 @@ jobs:
         image: opsman-product
         config: configuration
         env: configuration
-        vars: configuration
+        # vars: configuration
       params:
         ENV_FILE: config/vars/env.yml
         OPSMAN_CONFIG_FILE: config/opsman.yml
         STATE_FILE: state.yml
         INSTALLATION_FILE: installation*.zip
-        VARS_FILES: vars/vars/director.yml
-    - task: upload-pks-stemcell
+    - task: configure-director
       image: platform-automation-image
-      file: platform-automation-tasks/tasks/upload-stemcell.yml
+      file: platform-automation-tasks/tasks/configure-director.yml
       input_mapping:
+        config: configuration
         env: configuration
-        stemcell: pks-stemcell
       params:
         ENV_FILE: config/vars/env.yml
+        DIRECTOR_CONFIG_FILE: config/director.yml
+    - task: apply-director-changes
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/apply-director-changes.yml
+      attempts: 3
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        INSTALLATION_FILE: installation-$timestamp.zip
+    - put: installation
+      params:
+        file: installation/installation*.zip
+        # VARS_FILES: vars/vars/director.yml
+
 - name: upload-and-stage-tas
   serial: true
   serial_groups: [ products ]
   plan:
   - in_parallel:
     - get: platform-automation-image
-      tags: [platform-automation]
+       
       params:
         unpack: true
       trigger: true
       passed: [ "upgrade-opsman" ]
     - get: platform-automation-tasks
-      tags: [platform-automation]
+       
       params:
         unpack: true
     - get: configuration
-      tags: [platform-automation]
+       
     - get: tas-product
-    - get: tas-stemcell
+    # - get: tas-stemcell
   - task: prepare-tasks-with-secrets
     <<: *prepare-tasks-with-secrets
   - task: upload-tas-product
-    tags: [platform-automation]
+     
     image: platform-automation-image
     file: platform-automation-tasks/tasks/upload-product.yml
     input_mapping:
@@ -260,17 +308,17 @@ jobs:
       env: configuration
     params:
       ENV_FILE: config/vars/env.yml
-  - task: upload-tas-stemcell
-    tags: [platform-automation]
-    image: platform-automation-image
-    file: platform-automation-tasks/tasks/upload-stemcell.yml
-    input_mapping:
-      env: configuration
-      stemcell: tas-stemcell
-    params:
-      ENV_FILE: config/vars/env.yml
+  # - task: upload-tas-stemcell
+     
+  #   image: platform-automation-image
+  #   file: platform-automation-tasks/tasks/upload-stemcell.yml
+  #   input_mapping:
+  #     env: configuration
+  #     stemcell: tas-stemcell
+  #   params:
+  #     ENV_FILE: config/vars/env.yml
   - task: upload-and-stage-tas
-    tags: [platform-automation]
+     
     image: platform-automation-image
     file: platform-automation-tasks/tasks/stage-product.yml
     input_mapping:
@@ -285,23 +333,23 @@ jobs:
   plan:
   - in_parallel:
     - get: platform-automation-image
-      tags: [platform-automation]
+       
       params:
         unpack: true
       trigger: true
       passed: [ "upgrade-opsman" ]
     - get: platform-automation-tasks
-      tags: [platform-automation]
+       
       params:
         unpack: true
     - get: configuration
-      tags: [platform-automation]
+       
     - get: hub-product
     - get: tas-stemcell
   - task: prepare-tasks-with-secrets
     <<: *prepare-tasks-with-secrets
   - task: upload-hub-product
-    tags: [platform-automation]
+     
     image: platform-automation-image
     file: platform-automation-tasks/tasks/upload-product.yml
     input_mapping:
@@ -310,7 +358,7 @@ jobs:
     params:
       ENV_FILE: config/vars/env.yml
   - task: upload-tas-stemcell
-    tags: [platform-automation]
+     
     image: platform-automation-image
     file: platform-automation-tasks/tasks/upload-stemcell.yml
     input_mapping:
@@ -319,7 +367,7 @@ jobs:
     params:
       ENV_FILE: config/vars/env.yml
   - task: upload-and-stage-hub
-    tags: [platform-automation]
+     
     image: platform-automation-image
     file: platform-automation-tasks/tasks/stage-product.yml
     input_mapping:
@@ -334,23 +382,19 @@ jobs:
   plan:
   - in_parallel:
     - get: platform-automation-image
-      tags: [platform-automation]
       params:
         unpack: true
       trigger: true
       passed: [ "upgrade-opsman" ]
     - get: platform-automation-tasks
-      tags: [platform-automation]
       params:
         unpack: true
     - get: configuration
-      tags: [platform-automation]
     - get: compliance-scanner-product
-    - get: compliance-scanner-stemcell
+    # - get: compliance-scanner-stemcell
   - task: prepare-tasks-with-secrets
     <<: *prepare-tasks-with-secrets
   - task: upload-compliance-scanner-product
-    tags: [platform-automation]
     image: platform-automation-image
     file: platform-automation-tasks/tasks/upload-product.yml
     input_mapping:
@@ -358,17 +402,16 @@ jobs:
       env: configuration
     params:
       ENV_FILE: config/vars/env.yml
-  - task: upload-compliance-scanner-stemcell
-    tags: [platform-automation]
-    image: platform-automation-image
-    file: platform-automation-tasks/tasks/upload-stemcell.yml
-    input_mapping:
-      env: configuration
-      stemcell: compliance-scanner-stemcell
-    params:
-      ENV_FILE: config/vars/env.yml
+  # - task: upload-compliance-scanner-stemcell
+  #    
+  #   image: platform-automation-image
+  #   file: platform-automation-tasks/tasks/upload-stemcell.yml
+  #   input_mapping:
+  #     env: configuration
+  #     stemcell: compliance-scanner-stemcell
+  #   params:
+  #     ENV_FILE: config/vars/env.yml
   - task: upload-and-stage-compliance-scanner
-    tags: [platform-automation]
     image: platform-automation-image
     file: platform-automation-tasks/tasks/stage-product.yml
     input_mapping:
@@ -388,13 +431,13 @@ jobs:
         passed:
           - upload-and-stage-tas
         trigger: true
-        tags: [platform-automation]
+         
       - get: platform-automation-tasks
         params:
           unpack: true
-        tags: [platform-automation]
+         
       - get: configuration
-        tags: [platform-automation]
+         
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
     - task: configure-tas
@@ -408,7 +451,7 @@ jobs:
         CONFIG_FILE: config/cf.yml
         ENV_FILE: config/vars/env.yml
         # VARS_FILES: secrets/tas.yml
-      tags: [platform-automation]
+       
 
 - name: configure-hub
   serial: true
@@ -421,13 +464,13 @@ jobs:
         passed:
           - upload-and-stage-hub
         trigger: true
-        tags: [platform-automation]
+         
       - get: platform-automation-tasks
         params:
           unpack: true
-        tags: [platform-automation]
+         
       - get: configuration
-        tags: [platform-automation]
+         
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
     - task: configure-hub
@@ -441,7 +484,7 @@ jobs:
         CONFIG_FILE: config/hub.yml
         ENV_FILE: config/vars/env.yml
         # VARS_FILES: secrets/tas.yml
-      tags: [platform-automation]
+       
 - name: configure-compliance-scanner
   serial: true
   serial_groups: [ install ]
@@ -453,13 +496,10 @@ jobs:
         passed:
           - upload-and-stage-compliance-scanner
         trigger: true
-        tags: [platform-automation]
       - get: platform-automation-tasks
         params:
           unpack: true
-        tags: [platform-automation]
       - get: configuration
-        tags: [platform-automation]
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
     - task: configure-compliance-scanner
@@ -473,7 +513,6 @@ jobs:
         CONFIG_FILE: config/compliance-scanner.yml
         ENV_FILE: config/vars/env.yml
         # VARS_FILES: secrets/tas.yml
-      tags: [platform-automation]
 
 - name: create-root-ca
   plan:
@@ -481,16 +520,16 @@ jobs:
         - get: platform-automation-image
           params:
             unpack: true
-          tags: [platform-automation]
+ 
         - get: platform-automation-tasks
           params:
             unpack: true
-          tags: [platform-automation]
+ 
         - get: configuration
-          tags: [platform-automation]
+ 
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
-      tags: [platform-automation]
+       
     # code_snippet configure-new-certificate-authority-usage start yaml
     - task: create-root-ca
       image: platform-automation-image
@@ -499,7 +538,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     # code_snippet configure-new-certificate-authority-usage end
 
 - name: apply-new-ca
@@ -512,16 +551,16 @@ jobs:
           passed:
             - create-root-ca
           trigger: true
-          tags: [platform-automation]
+ 
         - get: platform-automation-tasks
           params:
             unpack: true
-          tags: [platform-automation]
+ 
         - get: configuration
-          tags: [platform-automation]
+ 
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
-      tags: [platform-automation]
+       
     - task: pre-deploy-check
       image: platform-automation-image
       file: platform-automation-tasks/tasks/pre-deploy-check.yml
@@ -529,7 +568,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     - task: apply-product-changes
       attempts: 3
       image: platform-automation-image
@@ -538,8 +577,8 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,pivotal-telemetry-om,p-compliance-scanner"
-      tags: [platform-automation]
+        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,p-compliance-scanner"
+       
 
 - name: activate-new-ca-and-regenerate-certs
   serial: true
@@ -551,16 +590,16 @@ jobs:
           passed:
             - apply-new-ca
           trigger: true
-          tags: [platform-automation]
+ 
         - get: platform-automation-tasks
           params:
             unpack: true
-          tags: [platform-automation]
+ 
         - get: configuration
-          tags: [platform-automation]
+ 
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
-      tags: [platform-automation]
+       
     # code_snippet activate-certificate-authority-usage start yaml
     - task: activate-new-ca
       image: platform-automation-image
@@ -569,7 +608,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     # code_snippet activate-certificate-authority-usage end
     # code_snippet regenerate-certificates-usage start yaml
     - task: regenerate-certificates
@@ -579,7 +618,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     # code_snippet regenerate-certificates-usage end
 
 - name: apply-certificates
@@ -592,16 +631,16 @@ jobs:
           passed:
             - activate-new-ca-and-regenerate-certs
           trigger: true
-          tags: [platform-automation]
+ 
         - get: platform-automation-tasks
           params:
             unpack: true
-          tags: [platform-automation]
+ 
         - get: configuration
-          tags: [platform-automation]
+ 
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
-      tags: [platform-automation]
+       
     - task: pre-deploy-check
       image: platform-automation-image
       file: platform-automation-tasks/tasks/pre-deploy-check.yml
@@ -609,7 +648,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     - task: apply-product-changes
       attempts: 3
       image: platform-automation-image
@@ -618,29 +657,29 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,pivotal-telemetry-om,p-compliance-scanner"
-      tags: [platform-automation]
+        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,p-compliance-scanner"
+       
 
 - name: cleanup-ca-certificate-authorities
   serial: true
   plan:
     - in_parallel:
         - get: platform-automation-image
-          tags: [platform-automation]
+ 
           params:
             unpack: true
           passed:
             - apply-certificates
           trigger: true
         - get: platform-automation-tasks
-          tags: [platform-automation]
+ 
           params:
             unpack: true
         - get: configuration
-          tags: [platform-automation]
+ 
     - task: prepare-tasks-with-secrets
       <<: *prepare-tasks-with-secrets
-      tags: [platform-automation]
+       
     # code_snippet delete-certificate-authority-usage start yaml
     - task: delete-certificate-authority
       image: platform-automation-image
@@ -649,7 +688,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     # code_snippet delete-certificate-authority-usage end
     - task: pre-deploy-check
       image: platform-automation-image
@@ -658,7 +697,7 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-      tags: [platform-automation]
+       
     - task: apply-product-changes
       attempts: 3
       image: platform-automation-image
@@ -667,5 +706,196 @@ jobs:
         env: configuration
       params:
         ENV_FILE: config/vars/env.yml
-        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,pivotal-telemetry-om,p-compliance-scanner"
-      tags: [platform-automation]
+        SELECTIVE_DEPLOY_PRODUCTS: "cf,p-bosh,p-compliance-scanner"
+
+- name: bump-director
+  serial: true
+  plan:
+    - in_parallel:
+        - get: platform-automation-image
+          params:
+            unpack: true
+        - get: platform-automation-tasks
+          params:
+            unpack: true
+        - get: director-config
+          trigger: true
+        - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: apply-director-changes
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/apply-director-changes.yml
+      attempts: 3
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        INSTALLATION_FILE: installation-$timestamp.zip
+    - put: installation
+      params:
+        file: installation/installation*.zip
+        # VARS_FILES: vars/vars/director.yml
+- name: bump-tas
+  serial: true
+  plan:
+    - in_parallel:
+        - get: platform-automation-image
+          params:
+            unpack: true
+        - get: platform-automation-tasks
+          params:
+            unpack: true
+        - get: tas-config
+          trigger: true
+        - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: test
+      file: platform-automation-tasks/tasks/test.yml
+      image: platform-automation-image
+    - task: configure-tas
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/configure-product.yml
+      input_mapping:
+        config: configuration
+        env: configuration
+        # vars: configuration
+      params:
+        CONFIG_FILE: config/cf.yml
+        ENV_FILE: config/vars/env.yml
+        # VARS_FILES: secrets/tas.yml
+    - task: pre-deploy-check
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/pre-deploy-check.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml      
+    - task: apply-product-changes
+      attempts: 3
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/apply-changes.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        SELECTIVE_DEPLOY_PRODUCTS: "p-bosh,cf"
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        INSTALLATION_FILE: installation-$timestamp.zip
+    - put: installation
+      params:
+        file: installation/installation*.zip
+        # VARS_FILES: vars/vars/director.yml
+
+- name: bump-compliance-scanner
+  serial: true
+  plan:
+    - in_parallel:
+        - get: platform-automation-image
+          params:
+            unpack: true
+        - get: platform-automation-tasks
+          params:
+            unpack: true
+        - get: compliance-scanner-config
+          trigger: true
+        - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets
+    - task: configure-compliance-scanner
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/configure-product.yml
+      input_mapping:
+        config: configuration
+        env: configuration
+        # vars: configuration
+      params:
+        CONFIG_FILE: config/compliance-scanner.yml
+        ENV_FILE: config/vars/env.yml
+        # VARS_FILES: secrets/tas.yml 
+    - task: pre-deploy-check
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/pre-deploy-check.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml      
+    - task: apply-product-changes
+      attempts: 3
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/apply-changes.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        SELECTIVE_DEPLOY_PRODUCTS: "p-bosh,p-compliance-scanner"
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        INSTALLATION_FILE: installation-$timestamp.zip
+    - put: installation
+      params:
+        file: installation/installation*.zip
+        # VARS_FILES: vars/vars/director.yml
+
+- name: apply-all-changes
+  serial: true
+  plan:
+    - in_parallel:
+        - get: platform-automation-image
+          passed: [configure-tas, configure-compliance-scanner]
+          trigger: true
+          params:
+            unpack: true
+        - get: platform-automation-tasks
+          params:
+            unpack: true
+        - get: configuration
+    - task: prepare-tasks-with-secrets
+      <<: *prepare-tasks-with-secrets 
+    - task: pre-deploy-check
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/pre-deploy-check.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml      
+    - task: apply-product-changes
+      attempts: 3
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/apply-changes.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+    - task: export-installation
+      image: platform-automation-image
+      file: platform-automation-tasks/tasks/export-installation.yml
+      input_mapping:
+        env: configuration
+      params:
+        ENV_FILE: config/vars/env.yml
+        INSTALLATION_FILE: installation-$timestamp.zip
+    - put: installation
+      params:
+        file: installation/installation*.zip
+        # VARS_FILES: vars/vars/director.yml
+
