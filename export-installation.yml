@@ -7,6 +7,11 @@ resources:
     bucket: ((platform-automation-bucket))
     regexp: backups/installation/installation-(.*).zip
 
+- name: midnight
+  type: time
+  source:
+    start: 5:06 AM
+    stop: 5:09 AM
 
 # - name: state
 #   type: s3
@@ -87,6 +92,8 @@ jobs:
         params:
           unpack: true
       - get: configuration
+      - get: midnight
+        trigger: true
       - task: prepare-tasks-with-secrets
         <<: *prepare-tasks-with-secrets
       - task: export-installation

@@ -67,7 +67,7 @@ resources:
   source:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
-    # bucket: ((platform-automation-bucket))
+    bucket: ((platform-automation-bucket))
     regexp: bosh-stemcell-(.*)-vsphere-esxi-ubuntu-jammy-fips-go_agent\.tgz
 
 - name: compliance-scanner-product

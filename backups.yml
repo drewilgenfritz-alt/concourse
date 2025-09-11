@@ -5,9 +5,16 @@ resources:
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-key))
     bucket: ((platform-automation-bucket))
-    regexp: backups/backup-(.*).tgz
-    initial_content_text: '{}'
-    initial_version: 'empty-start'
+    regexp: backups/director_(.*).tgz
+
+- name: backup-cf
+  type: s3
+  source:
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-key))
+    bucket: ((platform-automation-bucket))
+    regexp: backups/product_(.*).tgz
+
 
 - name: platform-automation-image
   type: s3
@@ -30,6 +37,12 @@ resources:
   source:
     uri: https://github.com/drewilgenfritz-alt/concourse.git
     branch: main
+
+- name: midnight
+  type: time
+  source:
+    start: 5:09 AM
+    stop: 5:10 AM
 
 prepare-tasks-with-secrets: &prepare-tasks-with-secrets
   image: platform-automation-image
@@ -54,6 +67,8 @@ jobs:
   - get: platform-automation-tasks
     params:
       unpack: true
+  - get: midnight
+    trigger: true
   - get: configuration
   - task: prepare-tasks-with-secrets
     <<: *prepare-tasks-with-secrets
@@ -69,4 +84,32 @@ jobs:
     input_mapping:
       env: configuration
   - put: backup
-    params: { file: backup/backup-*. }
+    params: { file: backup/director_*.tgz }
+
+- name: backup-tpcf
+  serial: true
+  plan:
+  - get: platform-automation-image
+    params:
+      unpack: true
+  - get: platform-automation-tasks
+    params:
+      unpack: true
+  # - get: midnight
+  #   trigger: true
+  - get: configuration
+  - task: prepare-tasks-with-secrets
+    <<: *prepare-tasks-with-secrets
+  - task: backup-cf
+    image: platform-automation-image
+    file: platform-automation-tasks/tasks/backup-product.yml
+    params:
+      CONFIG_FILE: config/vars/env.yml
+      SKIP_MISSING: true
+      OPSMAN_SSH_PRIVATE_KEY: ((opsmanssh.private_key))
+      PRODUCT_NAME: cf
+      ENV_FILE: config/vars/env.yml
+    input_mapping:
+      env: configuration
+  - put: backup-cf
+    params: { file: backup/product_*.tgz }
