@@ -1,0 +1,87 @@
+resource_types:
+- name: time
+  type: registry-image
+  source:
+    repository: concourse/time-resource
+
+resources:
+- name: rotation-timer
+  type: time
+  source:
+    interval: 1h  # Rotate every hour
+
+- name: rotation-script
+  type: git
+  source:
+    uri: https://github.com/drewilgenfritz-alt/concourse.git
+    branch: main
+    paths: [scripts/rotateCredentials.sh]
+
+jobs:
+- name: rotate-uaa-credentials
+  plan:
+  - get: rotation-timer
+    trigger: true
+  - get: rotation-script
+  - task: rotate-credentials
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source:
+          repository: ubuntu
+          tag: 20.04
+      inputs:
+      - name: rotation-script
+      params:
+        UAA_URL: ((uaa.url))
+        CLIENT_ID: ((uaa.admin-client-id))
+        CLIENT_SECRET: ((uaa.admin-client-secret))
+        TARGET_CLIENT: ((uaa.target-client-id))
+        CREDHUB_URL: ((credhub.url))
+        CREDHUB_CLIENT: ((credhub.client-id))
+        CREDHUB_SECRET: ((credhub.client-secret))
+      run:
+        path: bash
+        args:
+        - -c
+        - |
+          apt-get update && apt-get install -y curl jq openssl
+          chmod +x rotation-script/scripts/rotate-uaa-credentials.sh
+          ./rotation-script/scripts/rotate-uaa-credentials.sh
+
+- name: test-rotated-credentials
+  plan:
+  - get: rotation-timer
+    trigger: true
+    passed: [rotate-uaa-credentials]
+  - task: test-credentials
+    config:
+      platform: linux
+      image_resource:
+        type: registry-image
+        source:
+          repository: ubuntu
+          tag: 20.04
+      params:
+        UAA_URL: ((uaa.url))
+        CLIENT_ID: ((uaa.target-client-id))
+        CLIENT_SECRET: ((uaa.target-client-secret))
+      run:
+        path: bash
+        args:
+        - -c
+        - |
+          apt-get update && apt-get install -y curl jq
+          echo "Testing rotated credentials..."
+          TOKEN=$(curl -s -X POST "$UAA_URL/oauth/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -u "$CLIENT_ID:$CLIENT_SECRET" \
+            -d "grant_type=client_credentials" | jq -r '.access_token')
+          
+          if [ "$TOKEN" != "null" ] && [ -n "$TOKEN" ]; then
+            echo "✅ Credentials test successful"
+          else
+            echo "❌ Credentials test failed"
+            exit 1
+          fi
