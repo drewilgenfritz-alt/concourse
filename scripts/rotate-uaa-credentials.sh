@@ -47,17 +47,8 @@ get_uaa_token() {
     local response
     local http_code
     
-    response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST "$UAA_URL/oauth/token" \
-        -H "Accept: application/json" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -u "$client_id:$client_secret" \
-        -d "grant_type=client_credentials")
+    response=$(curl -k "https://uaa.sys.home.fritzyTech.com/oauth/token" -d "grant_type=client_credentials" -d "client_id=admin" -d "client_secret=ZhAPma0Smz4e50rlc_RbQJOH_BVhvDzo" -d "response_type=token")
     log "Response: $response"
-    http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
-    response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
-    log "Response: $response"
-    log "HTTP Response Code: $http_code"
-    debug "HTTP Response Code: $http_code"
     
     if [ "$http_code" != "200" ]; then
         error "UAA token request failed with HTTP $http_code. Response: $response"
