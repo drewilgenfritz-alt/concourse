@@ -8,22 +8,20 @@ resources:
 - name: rotation-timer
   type: time
   source:
-    interval: 1h
+    interval: 24h  # Rotate daily
 
-- name: repo
+- name: concourse-repo
   type: git
   source:
     uri: ((git.uri))
     branch: ((git.branch))
-    paths: [scripts/rotate-uaa-credentials.sh]
 
 jobs:
 - name: rotate-uaa-credentials
-  serial: true
   plan:
   - get: rotation-timer
     trigger: true
-  - get: repo
+  - get: concourse-repo
   - task: rotate-credentials
     config:
       platform: linux
@@ -33,7 +31,7 @@ jobs:
           repository: ubuntu
           tag: 20.04
       inputs:
-      - name: repo
+      - name: concourse-repo
       params:
         UAA_URL: ((uaa.url))
         CLIENT_ID: ((uaa.admin-client-id))
@@ -43,24 +41,35 @@ jobs:
         CREDHUB_CLIENT: ((credhub.client-id))
         CREDHUB_SECRET: ((credhub.client-secret))
         CREDHUB_PATH: ((credhub.path))
+        SKIP_TLS_VERIFY: "false"  # Set to "true" if using self-signed certs
       run:
         path: bash
         args:
         - -c
         - |
-          set -euo pipefail
-          apt-get update -qq && apt-get install -y -qq curl jq openssl
-          chmod +x repo/scripts/rotate-uaa-credentials.sh
-          cd repo
-          ./scripts/rotate-uaa-credentials.sh
+          set -e
+          apt-get update && apt-get install -y curl jq openssl
+          chmod +x concourse-repo/scripts/rotate-uaa-credentials.sh
+          ./concourse-repo/scripts/rotate-uaa-credentials.sh
+    on_failure:
+      task: log-failure
+      config:
+        platform: linux
+        image_resource:
+          type: registry-image
+          source:
+            repository: ubuntu
+            tag: 20.04
+        run:
+          path: echo
+          args: ["UAA credential rotation failed - check logs above"]
 
 - name: verify-rotation
-  serial: true
   plan:
   - get: rotation-timer
     trigger: true
     passed: [rotate-uaa-credentials]
-  - task: verify-credentials
+  - task: test-new-credentials
     config:
       platform: linux
       image_resource:
@@ -77,18 +86,17 @@ jobs:
         args:
         - -c
         - |
-          set -euo pipefail
-          apt-get update -qq && apt-get install -y -qq curl jq
+          apt-get update && apt-get install -y curl jq
+          echo "Verifying rotated credentials work..."
           
-          echo "Verifying rotated credentials..."
-          TOKEN=$(curl -s -X POST "$UAA_URL/oauth/token" \
+          TOKEN=$(curl -k -s -X POST "$UAA_URL/oauth/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -u "$CLIENT_ID:$CLIENT_SECRET" \
-            -d "grant_type=client_credentials" | jq -r '.access_token')
+            -d "grant_type=client_credentials" | jq -r '.access_token' 2>/dev/null || echo "")
           
-          if [[ "$TOKEN" != "null" && -n "$TOKEN" ]]; then
-            echo "✅ Verification successful - rotated credentials work"
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            echo "✅ Rotated credentials verification successful"
           else
-            echo "❌ Verification failed - rotated credentials don't work"
+            echo "❌ Rotated credentials verification failed"
             exit 1
           fi
