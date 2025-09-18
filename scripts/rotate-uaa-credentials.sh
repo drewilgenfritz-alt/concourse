@@ -11,7 +11,7 @@ CREDHUB_CLIENT="${CREDHUB_CLIENT:-credhub_admin_client}"
 CREDHUB_SECRET="${CREDHUB_SECRET:-}"
 CREDHUB_PATH="${CREDHUB_PATH:-/concourse/main/uaa_client_secret}"
 
-# Logging
+# Logging functions
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
 }
@@ -32,7 +32,6 @@ test_connectivity() {
     
     if curl -s --connect-timeout 10 --max-time 30 "$url/info" > /dev/null 2>&1; then
         log "✓ Connectivity to UAA confirmed"
-        return 0
     else
         error "Cannot connect to UAA at $url. Please check network connectivity and URL."
     fi
@@ -43,35 +42,31 @@ get_uaa_token() {
     local client_id=$1
     local client_secret=$2
     
-    debug "Getting UAA token for client: $client_id using URL: $UAA_URL/oauth/token"
+    debug "Getting UAA token for client: $client_id"
     
     local response
     local http_code
     
-    # Make the token request
     response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST "$UAA_URL/oauth/token" \
         -H "Accept: application/json" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -u "$client_id:$client_secret" \
-        -d "grant_type=client_credentials" 2>/dev/null)
+        -d "grant_type=client_credentials")
     
-    # Extract HTTP status code
     http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
     response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
     
     debug "HTTP Response Code: $http_code"
-    debug "Response Body: $response"
     
     if [ "$http_code" != "200" ]; then
         error "UAA token request failed with HTTP $http_code. Response: $response"
     fi
     
-    # Extract access token
     local token
-    token=$(echo "$response" | jq -r '.access_token' 2>/dev/null)
+    token=$(echo "$response" | jq -r '.access_token')
     
     if [ "$token" = "null" ] || [ -z "$token" ]; then
-        error "Failed to parse access token from response: $response"
+        error "Failed to parse access token from response"
     fi
     
     echo "$token"
@@ -79,33 +74,7 @@ get_uaa_token() {
 
 # Generate secure password
 generate_secret() {
-    log "Generated new secret"
     openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
-}
-
-# Get current UAA client configuration
-get_client_config() {
-    local token=$1
-    local client_id=$2
-    
-    debug "Fetching current client configuration for: $client_id"
-    
-    local response
-    local http_code
-    
-    response=$(curl -s -w "HTTPSTATUS:%{http_code}" \
-        -H "Authorization: Bearer $token" \
-        -H "Accept: application/json" \
-        "$UAA_URL/oauth/clients/$client_id" 2>/dev/null)
-    
-    http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
-    response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
-    
-    if [ "$http_code" != "200" ]; then
-        error "Failed to get client config. HTTP $http_code. Response: $response"
-    fi
-    
-    echo "$response"
 }
 
 # Update UAA client secret
@@ -117,22 +86,32 @@ update_uaa_client_secret() {
     log "Updating UAA client secret for: $client_id"
     
     # Get current client configuration
-    local current_config
-    current_config=$(get_client_config "$token" "$client_id")
-    
-    # Update secret in the configuration
-    local updated_config
-    updated_config=$(echo "$current_config" | jq --arg secret "$new_secret" '.client_secret = $secret')
-    
-    # Send update request
+    debug "Fetching current client configuration"
     local response
     local http_code
     
+    response=$(curl -s -w "HTTPSTATUS:%{http_code}" \
+        -H "Authorization: Bearer $token" \
+        -H "Accept: application/json" \
+        "$UAA_URL/oauth/clients/$client_id")
+    
+    http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
+    response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
+    
+    if [ "$http_code" != "200" ]; then
+        error "Failed to get client config. HTTP $http_code. Response: $response"
+    fi
+    
+    # Update configuration with new secret
+    local updated_config
+    updated_config=$(echo "$response" | jq --arg secret "$new_secret" '.client_secret = $secret')
+    
+    # Apply update
     response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X PUT "$UAA_URL/oauth/clients/$client_id" \
         -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json" \
-        -d "$updated_config" 2>/dev/null)
+        -d "$updated_config")
     
     http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
     response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
@@ -155,7 +134,7 @@ update_credhub_secret() {
     local credhub_token
     credhub_token=$(get_uaa_token "$CREDHUB_CLIENT" "$CREDHUB_SECRET")
     
-    # Update secret in CredHub
+    # Update secret
     local response
     local http_code
     
@@ -166,34 +145,15 @@ update_credhub_secret() {
             \"name\": \"$path\",
             \"type\": \"password\",
             \"value\": \"$new_secret\"
-        }" 2>/dev/null)
+        }")
     
     http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
-    response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
     
     if [ "$http_code" != "200" ] && [ "$http_code" != "201" ]; then
-        error "Failed to update CredHub secret. HTTP $http_code. Response: $response"
+        error "Failed to update CredHub secret. HTTP $http_code"
     fi
     
     log "Successfully updated CredHub secret"
-}
-
-# Validate rotated credentials
-validate_credentials() {
-    local client_id=$1
-    local client_secret=$2
-    
-    log "Validating rotated credentials..."
-    
-    local test_token
-    test_token=$(get_uaa_token "$client_id" "$client_secret")
-    
-    if [ -n "$test_token" ] && [ "$test_token" != "null" ]; then
-        log "✅ Credential validation successful"
-        return 0
-    else
-        error "❌ Credential validation failed"
-    fi
 }
 
 # Main function
@@ -220,6 +180,7 @@ main() {
     # Generate new secret
     local new_secret
     new_secret=$(generate_secret)
+    log "Generated new secret"
     
     # Get admin token
     log "Authenticating with UAA admin client"
@@ -229,16 +190,20 @@ main() {
     # Update UAA client secret
     update_uaa_client_secret "$admin_token" "$TARGET_CLIENT" "$new_secret"
     
-    # Small delay for UAA to process the change
-    sleep 2
-    
     # Update CredHub secret
     update_credhub_secret "$CREDHUB_PATH" "$new_secret"
     
-    # Validate the new credentials
-    validate_credentials "$TARGET_CLIENT" "$new_secret"
+    # Validate new credentials
+    log "Testing new credentials..."
+    local test_token
+    test_token=$(get_uaa_token "$TARGET_CLIENT" "$new_secret")
     
-    log "🎉 Credential rotation completed successfully!"
+    if [ -n "$test_token" ]; then
+        log "✅ New credentials verified successfully"
+        log "🎉 Credential rotation completed successfully!"
+    else
+        error "❌ New credentials verification failed"
+    fi
 }
 
 # Execute
