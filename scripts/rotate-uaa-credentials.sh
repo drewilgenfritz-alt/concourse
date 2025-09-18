@@ -52,10 +52,11 @@ get_uaa_token() {
         -H "Content-Type: application/x-www-form-urlencoded" \
         -u "$client_id:$client_secret" \
         -d "grant_type=client_credentials")
-    
+    log "Response: $response"
     http_code=$(echo "$response" | grep -o 'HTTPSTATUS:[0-9]*' | cut -d: -f2)
     response=$(echo "$response" | sed 's/HTTPSTATUS:[0-9]*$//')
-    
+    log "Response: $response"
+    log "HTTP Response Code: $http_code"
     debug "HTTP Response Code: $http_code"
     
     if [ "$http_code" != "200" ]; then
