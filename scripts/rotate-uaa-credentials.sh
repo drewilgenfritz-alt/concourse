@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Configuration with defaults
-UAA_URL="${UAA_URL:-https://uaa.sys.fritzyTech.com}"
-CREDHUB_URL="${CREDHUB_URL:-https://uaa.sys.fritzyTech.com}"
+UAA_URL="${UAA_URL:-https://uaa.sys.home.fritzyTech.com}"
+CREDHUB_URL="${CREDHUB_URL:-https://uaa.sys.home.fritzyTech.com}"
 CLIENT_ID="${CLIENT_ID:-admin}"
 CLIENT_SECRET="${CLIENT_SECRET:-}"
 TARGET_CLIENT="${TARGET_CLIENT:-concourse_client}"
